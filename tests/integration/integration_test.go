@@ -152,7 +152,7 @@ func waitForSeededData(ctx context.Context) error {
 		case <-ctx.Done():
 			return fmt.Errorf("timed out waiting for seeded data (last: %s): %w", lastErr, ctx.Err())
 		case <-ticker.C:
-			resp, err := httpClient.Get(baseURL + "/product")
+			resp, err := httpClient.Get(baseURL + "/api/product")
 			if err != nil {
 				lastErr = err.Error()
 				continue

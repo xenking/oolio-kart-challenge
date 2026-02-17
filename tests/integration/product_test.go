@@ -8,7 +8,7 @@ import (
 )
 
 func TestListProducts(t *testing.T) {
-	resp := doGet(t, "/product")
+	resp := doGet(t, "/api/product")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -22,7 +22,7 @@ func TestListProducts(t *testing.T) {
 }
 
 func TestListProducts_Fields(t *testing.T) {
-	resp := doGet(t, "/product")
+	resp := doGet(t, "/api/product")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {

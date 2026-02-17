@@ -74,6 +74,7 @@ func main() {
 		)
 
 		oasServer, err := oas.NewServer(handler, handler,
+			oas.WithPathPrefix("/api"),
 			oas.WithTracerProvider(m.TracerProvider()),
 			oas.WithMeterProvider(m.MeterProvider()),
 		)
@@ -86,7 +87,7 @@ func main() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/livez", healthSvc.LiveEndpoint)
 		mux.HandleFunc("/readyz", healthSvc.ReadyEndpoint)
-		mux.Handle("/", oasServer)
+		mux.Handle("/api/", oasServer)
 
 		server := &http.Server{
 			ReadHeaderTimeout: time.Second,

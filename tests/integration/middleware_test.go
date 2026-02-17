@@ -38,7 +38,7 @@ func TestRequestID_Echoed(t *testing.T) {
 }
 
 func TestCORS_Preflight(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodOptions, baseURL+"/product", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodOptions, baseURL+"/api/product", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestCORS_Preflight(t *testing.T) {
 }
 
 func TestCORS_SimpleRequest(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/product", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/api/product", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestCORS_SimpleRequest(t *testing.T) {
 }
 
 func TestRateLimit_Headers(t *testing.T) {
-	resp := doGet(t, "/product")
+	resp := doGet(t, "/api/product")
 	defer resp.Body.Close()
 
 	if limit := resp.Header.Get("X-RateLimit-Limit"); limit == "" {

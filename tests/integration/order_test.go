@@ -16,7 +16,7 @@ func TestPlaceOrder_NoAuth(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{{ProductID: "1", Quantity: 1}},
 	}
-	resp := doPost(t, "/order", req)
+	resp := doPost(t, "/api/order", req)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -28,7 +28,7 @@ func TestPlaceOrder_InvalidKey(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{{ProductID: "1", Quantity: 1}},
 	}
-	resp := doPostWithAuth(t, "/order", req, "wrong-key")
+	resp := doPostWithAuth(t, "/api/order", req, "wrong-key")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -40,7 +40,7 @@ func TestPlaceOrder_EmptyItems(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{},
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -52,7 +52,7 @@ func TestPlaceOrder_InvalidProduct(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{{ProductID: "999", Quantity: 1}},
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -64,7 +64,7 @@ func TestPlaceOrder_SingleItem(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{{ProductID: "1", Quantity: 1}}, // Waffle $6.50
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -87,7 +87,7 @@ func TestPlaceOrder_MultipleItems(t *testing.T) {
 			{ProductID: "2", Quantity: 1}, // 1x Creme Brulee $7.00
 		},
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -105,7 +105,7 @@ func TestPlaceOrder_HappyHours(t *testing.T) {
 		Items:      []orderItemRequest{{ProductID: "3", Quantity: 1}}, // Macaron $8.00
 		CouponCode: "HAPPYHOURS",
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -131,7 +131,7 @@ func TestPlaceOrder_BuyGetOne(t *testing.T) {
 		},
 		CouponCode: "BUYGETONE",
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -154,7 +154,7 @@ func TestPlaceOrder_BuyGetOne_InsufficientItems(t *testing.T) {
 		Items:      []orderItemRequest{{ProductID: "1", Quantity: 1}}, // Only 1 item, needs 2
 		CouponCode: "BUYGETONE",
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -167,7 +167,7 @@ func TestPlaceOrder_InvalidCoupon(t *testing.T) {
 		Items:      []orderItemRequest{{ProductID: "1", Quantity: 1}},
 		CouponCode: "NONEXISTENT",
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -179,7 +179,7 @@ func TestPlaceOrder_ResponseStructure(t *testing.T) {
 	req := orderRequest{
 		Items: []orderItemRequest{{ProductID: "1", Quantity: 1}},
 	}
-	resp := doPostWithAuth(t, "/order", req, testAPIKey)
+	resp := doPostWithAuth(t, "/api/order", req, testAPIKey)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
