@@ -35,6 +35,10 @@ func main() {
 		}
 		cfg.applyPlatformDefaults()
 
+		if cfg.DatabaseURL == "" {
+			return errors.New("database URL is required: set KART_DATABASE_URL or DATABASE_URL")
+		}
+
 		lg.Info("Initializing", zap.String("addr", cfg.Addr))
 
 		// PostgreSQL pool + migrations.

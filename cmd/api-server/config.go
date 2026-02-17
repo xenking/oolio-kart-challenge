@@ -9,7 +9,7 @@ import (
 // environment variables (KART_ prefix), flags, or YAML config files.
 type Config struct {
 	Addr         string `default:"0.0.0.0:8080" usage:"API server listen address"`
-	DatabaseURL  string `required:"true" usage:"PostgreSQL connection URL" flag:"database-url"`
+	DatabaseURL  string `usage:"PostgreSQL connection URL (KART_DATABASE_URL or DATABASE_URL)" flag:"database-url"`
 	ImageBaseURL string `default:"" usage:"Base URL for product images (e.g. https://cdn.example.com/images)" flag:"image-base-url"`
 	RateLimit    RateLimitConfig
 	CORS         CORSConfig
