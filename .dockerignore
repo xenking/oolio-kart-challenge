@@ -1,0 +1,9 @@
+.git
+.github
+.claude
+docs
+testdata
+data
+*.md
+LICENSE
+.DS_Store

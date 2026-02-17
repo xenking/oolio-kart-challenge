@@ -1,0 +1,10 @@
+addr: "0.0.0.0:8080"
+image_base_url: "https://orderfoodonline.deno.dev/public"
+rate_limit:
+  max: 100
+  window: 1m
+cors:
+  origins: ["*"]
+graceful:
+  readiness_delay: 3s
+  shutdown_timeout: 15s

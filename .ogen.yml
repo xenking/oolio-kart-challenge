@@ -1,0 +1,5 @@
+generator:
+  features:
+    enable:
+      - "ogen/otel"
+      - "ogen/unimplemented"
