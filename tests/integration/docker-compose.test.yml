@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kart
+      POSTGRES_USER: kart
+      POSTGRES_PASSWORD: kart
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kart"]
+      interval: 2s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    ports:
+      - "8080"
+    environment:
+      KART_DATABASE_URL: postgres://kart:kart@postgres:5432/kart?sslmode=disable
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      KART_RATE_LIMIT_MAX: "1000"
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      interval: 3s
+      retries: 10

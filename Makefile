@@ -39,6 +39,10 @@ test: ## Run tests with race detector and coverage
 	go test -race $(TESTS_PATH) -coverprofile=$(COVERAGE_OUT) -covermode=atomic -coverpkg=$(TESTS_PATH)
 .PHONY: test
 
+test-integration: ## Run integration tests (requires Docker)
+	go test -v -tags integration -count=1 -timeout 5m ./tests/integration/
+.PHONY: test-integration
+
 test-cover: test ## Run tests and display coverage summary
 	@go tool cover -func $(COVERAGE_OUT) | awk '/^total:/ {print "Total coverage: " $$3}'
 .PHONY: test-cover
