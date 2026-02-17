@@ -66,7 +66,7 @@ func TestListProducts_Fields(t *testing.T) {
 }
 
 func TestGetProduct(t *testing.T) {
-	resp := doGet(t, "/product/1")
+	resp := doGet(t, "/api/product/1")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -83,7 +83,7 @@ func TestGetProduct(t *testing.T) {
 }
 
 func TestGetProduct_NotFound(t *testing.T) {
-	resp := doGet(t, "/product/999")
+	resp := doGet(t, "/api/product/999")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNotFound {
