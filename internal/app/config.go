@@ -1,8 +1,12 @@
-package main
+package app
 
 import (
 	"os"
 	"time"
+
+	"github.com/cristalhq/aconfig"
+	"github.com/cristalhq/aconfig/aconfigyaml"
+	"github.com/go-faster/errors"
 )
 
 // Config holds the complete application configuration, loadable from
@@ -11,6 +15,7 @@ type Config struct {
 	Addr         string `default:"0.0.0.0:8080" usage:"API server listen address"`
 	DatabaseURL  string `usage:"PostgreSQL connection URL (KART_DATABASE_URL or DATABASE_URL)" flag:"database-url"`
 	ImageBaseURL string `default:"" usage:"Base URL for product images (e.g. https://cdn.example.com/images)" flag:"image-base-url"`
+	APIKeyPepper string `usage:"HMAC pepper for API key hashing (KART_API_KEY_PEPPER)" flag:"api-key-pepper"`
 	RateLimit    RateLimitConfig
 	CORS         CORSConfig
 	Graceful     GracefulConfig
@@ -32,6 +37,29 @@ type CORSConfig struct {
 type GracefulConfig struct {
 	ReadinessDelay  time.Duration `default:"3s"  usage:"Delay after readiness=false before shutdown" flag:"readiness-delay"`
 	ShutdownTimeout time.Duration `default:"15s" usage:"Maximum shutdown duration" flag:"shutdown-timeout"`
+}
+
+// LoadConfig loads configuration from environment variables, YAML config files,
+// and applies platform-specific defaults.
+func LoadConfig() (*Config, error) {
+	var cfg Config
+	loader := aconfig.LoaderFor(&cfg, aconfig.Config{
+		EnvPrefix: "KART",
+		Files:     []string{"config.yaml", "/etc/kart/config.yaml"},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".yaml": aconfigyaml.New(),
+		},
+	})
+	if err := loader.Load(); err != nil {
+		return nil, errors.Wrap(err, "load config")
+	}
+	cfg.applyPlatformDefaults()
+
+	if cfg.DatabaseURL == "" {
+		return nil, errors.New("database URL is required: set KART_DATABASE_URL or DATABASE_URL")
+	}
+
+	return &cfg, nil
 }
 
 // applyPlatformDefaults maps platform-provided environment variables (Railway,

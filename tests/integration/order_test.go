@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-const testAPIKey = "apitest"
+// testAPIKey must match the KART_SEED_API_KEY env in docker-compose.test.yml.
+const testAPIKey = "integration-test-key"
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 

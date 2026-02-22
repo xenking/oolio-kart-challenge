@@ -8,11 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	_ "embed"
+	"github.com/xenking/oolio-kart-challenge/db"
 )
-
-//go:embed migrations/001_schema.sql
-var schema string
 
 // NewPool creates a pgxpool.Pool configured with shopspring/decimal support
 // for NUMERIC columns.
@@ -37,7 +34,7 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 
 // RunMigrations executes the embedded DDL schema against the pool.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, schema)
+	_, err := pool.Exec(ctx, db.Schema)
 	if err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}

@@ -8,20 +8,20 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xenking/oolio-kart-challenge/internal/coupon"
-	"github.com/xenking/oolio-kart-challenge/internal/dbgen"
+	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/coupon"
 )
 
 var _ coupon.Repository = (*CouponRepository)(nil)
 
 // CouponRepository implements coupon.Repository backed by PostgreSQL.
 type CouponRepository struct {
-	q *dbgen.Queries
+	q *sqlc.Queries
 }
 
 // NewCouponRepository returns a CouponRepository that uses the given pool.
 func NewCouponRepository(pool *pgxpool.Pool) *CouponRepository {
-	return &CouponRepository{q: dbgen.New(pool)}
+	return &CouponRepository{q: sqlc.New(pool)}
 }
 
 // FindByCode looks up an active coupon by its code. The SQL query applies
@@ -40,7 +40,7 @@ func (r *CouponRepository) FindByCode(ctx context.Context, code string) (*coupon
 	return &rule, nil
 }
 
-func mapCouponRule(row dbgen.GetCouponByCodeRow) coupon.Rule {
+func mapCouponRule(row sqlc.GetCouponByCodeRow) coupon.Rule {
 	return coupon.Rule{
 		Code:         row.Code,
 		DiscountType: coupon.DiscountType(row.DiscountType),

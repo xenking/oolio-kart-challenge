@@ -124,6 +124,8 @@ func testMain(m *testing.M) int {
 	exitCode, output, err := apiContainer.Exec(ctx, []string{
 		"/app/seed-db",
 		"--database-url=postgres://kart:kart@postgres:5432/kart?sslmode=disable",
+		"--api-key=integration-test-key",
+		"--api-key-pepper=test-pepper-for-integration",
 	})
 	if err != nil {
 		log.Fatalf("seed exec: %v", err)

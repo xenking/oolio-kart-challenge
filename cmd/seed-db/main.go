@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,8 +14,8 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/shopspring/decimal"
 
-	"github.com/xenking/oolio-kart-challenge/internal/dbgen"
-	"github.com/xenking/oolio-kart-challenge/internal/postgres"
+	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
+	"github.com/xenking/oolio-kart-challenge/internal/storage/postgres"
 )
 
 type productJSON struct {
@@ -35,11 +36,13 @@ func main() {
 		databaseURL  string
 		productsFile string
 		apiKey       string
+		apiKeyPepper string
 	)
 
 	flag.StringVar(&databaseURL, "database-url", "", "PostgreSQL connection URL (or DATABASE_URL env)")
 	flag.StringVar(&productsFile, "products-file", "db/seed/products.json", "path to products JSON file")
-	flag.StringVar(&apiKey, "api-key", "", "API key to seed (or KART_SEED_API_KEY env, default: apitest)")
+	flag.StringVar(&apiKey, "api-key", "", "API key to seed (or KART_SEED_API_KEY env)")
+	flag.StringVar(&apiKeyPepper, "api-key-pepper", "", "HMAC pepper for API key hashing (or KART_API_KEY_PEPPER env)")
 	flag.Parse()
 
 	if databaseURL == "" {
@@ -53,13 +56,17 @@ func main() {
 		apiKey = os.Getenv("KART_SEED_API_KEY")
 	}
 	if apiKey == "" {
-		apiKey = "apitest"
+		slog.Error("API key is required: set --api-key or KART_SEED_API_KEY")
+		os.Exit(1)
+	}
+	if apiKeyPepper == "" {
+		apiKeyPepper = os.Getenv("KART_API_KEY_PEPPER")
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, databaseURL, productsFile, apiKey); err != nil {
+	if err := run(ctx, databaseURL, productsFile, apiKey, apiKeyPepper); err != nil {
 		slog.Error("seed failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
@@ -67,7 +74,7 @@ func main() {
 	slog.Info("seed completed successfully")
 }
 
-func run(ctx context.Context, databaseURL, productsFile, apiKey string) error {
+func run(ctx context.Context, databaseURL, productsFile, apiKey, pepper string) error {
 	slog.Info("connecting to database")
 
 	pool, err := postgres.NewPool(ctx, databaseURL)
@@ -82,7 +89,7 @@ func run(ctx context.Context, databaseURL, productsFile, apiKey string) error {
 		return errors.Wrap(err, "run migrations")
 	}
 
-	queries := dbgen.New(pool)
+	queries := sqlc.New(pool)
 
 	if err := seedProducts(ctx, queries, productsFile); err != nil {
 		return errors.Wrap(err, "seed products")
@@ -92,14 +99,14 @@ func run(ctx context.Context, databaseURL, productsFile, apiKey string) error {
 		return errors.Wrap(err, "seed coupons")
 	}
 
-	if err := seedAPIKey(ctx, queries, apiKey); err != nil {
+	if err := seedAPIKey(ctx, queries, apiKey, pepper); err != nil {
 		return errors.Wrap(err, "seed api key")
 	}
 
 	return nil
 }
 
-func seedProducts(ctx context.Context, queries *dbgen.Queries, productsFile string) error {
+func seedProducts(ctx context.Context, queries *sqlc.Queries, productsFile string) error {
 	slog.Info("reading products file", slog.String("path", productsFile))
 
 	data, err := os.ReadFile(productsFile)
@@ -115,7 +122,7 @@ func seedProducts(ctx context.Context, queries *dbgen.Queries, productsFile stri
 	slog.Info("upserting products", slog.Int("count", len(products)))
 
 	for _, p := range products {
-		if err := queries.UpsertProduct(ctx, dbgen.UpsertProductParams{
+		if err := queries.UpsertProduct(ctx, sqlc.UpsertProductParams{
 			ID:             p.ID,
 			Name:           p.Name,
 			Price:          p.Price,
@@ -134,10 +141,10 @@ func seedProducts(ctx context.Context, queries *dbgen.Queries, productsFile stri
 	return nil
 }
 
-func seedCoupons(ctx context.Context, queries *dbgen.Queries) error {
+func seedCoupons(ctx context.Context, queries *sqlc.Queries) error {
 	slog.Info("seeding challenge coupons")
 
-	coupons := []dbgen.UpsertCouponParams{
+	coupons := []sqlc.UpsertCouponParams{
 		{
 			Code:         "HAPPYHOURS",
 			DiscountType: "percentage",
@@ -167,13 +174,14 @@ func seedCoupons(ctx context.Context, queries *dbgen.Queries) error {
 	return nil
 }
 
-func seedAPIKey(ctx context.Context, queries *dbgen.Queries, apiKey string) error {
+func seedAPIKey(ctx context.Context, queries *sqlc.Queries, apiKey, pepper string) error {
 	slog.Info("seeding default API key")
 
-	hash := sha256.Sum256([]byte(apiKey))
-	keyHash := hex.EncodeToString(hash[:])
+	mac := hmac.New(sha256.New, []byte(pepper))
+	mac.Write([]byte(apiKey))
+	keyHash := hex.EncodeToString(mac.Sum(nil))
 
-	if err := queries.UpsertAPIKey(ctx, dbgen.UpsertAPIKeyParams{
+	if err := queries.UpsertAPIKey(ctx, sqlc.UpsertAPIKeyParams{
 		ID:      "default",
 		KeyHash: keyHash,
 		Name:    "Default test key",

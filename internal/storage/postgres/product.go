@@ -8,20 +8,20 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xenking/oolio-kart-challenge/internal/dbgen"
-	"github.com/xenking/oolio-kart-challenge/internal/product"
+	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/product"
 )
 
 var _ product.Repository = (*ProductRepository)(nil)
 
 // ProductRepository implements product.Repository backed by PostgreSQL.
 type ProductRepository struct {
-	q *dbgen.Queries
+	q *sqlc.Queries
 }
 
 // NewProductRepository returns a ProductRepository that uses the given pool.
 func NewProductRepository(pool *pgxpool.Pool) *ProductRepository {
-	return &ProductRepository{q: dbgen.New(pool)}
+	return &ProductRepository{q: sqlc.New(pool)}
 }
 
 // List returns all products from the catalog ordered by ID.
@@ -53,7 +53,7 @@ func (r *ProductRepository) GetByID(ctx context.Context, id string) (*product.Pr
 	return &p, nil
 }
 
-func mapProduct(row dbgen.Product) product.Product {
+func mapProduct(row sqlc.Product) product.Product {
 	return product.Product{
 		ID:       row.ID,
 		Name:     row.Name,

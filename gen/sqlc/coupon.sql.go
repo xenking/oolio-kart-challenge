@@ -3,7 +3,7 @@
 //   sqlc v1.30.0
 // source: coupon.sql
 
-package dbgen
+package sqlc
 
 import (
 	"context"

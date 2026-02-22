@@ -1,7 +1,8 @@
-package api
+package handler
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
@@ -11,10 +12,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/xenking/oolio-kart-challenge/internal/coupon"
-	"github.com/xenking/oolio-kart-challenge/internal/oas"
-	"github.com/xenking/oolio-kart-challenge/internal/order"
-	"github.com/xenking/oolio-kart-challenge/internal/product"
+	"github.com/xenking/oolio-kart-challenge/gen/oas"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/auth"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/coupon"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/order"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/product"
 )
 
 // --- Mock implementations ---
@@ -61,11 +63,11 @@ func (m *mockOrderRepo) Create(_ context.Context, o *order.Order) error {
 }
 
 type mockAPIKeyRepo struct {
-	info *APIKeyInfo
+	info *auth.APIKeyInfo
 	err  error
 }
 
-func (m *mockAPIKeyRepo) FindByHash(_ context.Context, _ string) (*APIKeyInfo, error) {
+func (m *mockAPIKeyRepo) FindByHash(_ context.Context, _ string) (*auth.APIKeyInfo, error) {
 	return m.info, m.err
 }
 
@@ -97,6 +99,15 @@ func newProductRepo(products ...product.Product) *mockProductRepo {
 	}
 }
 
+func newTestHandler(
+	products *mockProductRepo,
+	coupons *mockCouponValidator,
+	orders *mockOrderRepo,
+) *Handler {
+	svc := order.NewService(products, coupons, orders)
+	return NewHandler(HandlerConfig{}, products, svc)
+}
+
 // --- Tests ---
 
 func TestListProducts(t *testing.T) {
@@ -104,7 +115,7 @@ func TestListProducts(t *testing.T) {
 	p2 := newTestProduct("p2", "Gadget", decimal.NewFromInt(20))
 	repo := newProductRepo(p1, p2)
 
-	h := NewHandler(HandlerConfig{}, repo, &mockCouponValidator{}, &mockOrderRepo{}, &mockAPIKeyRepo{})
+	h := newTestHandler(repo, &mockCouponValidator{}, &mockOrderRepo{})
 
 	result, err := h.ListProducts(context.Background())
 	require.NoError(t, err)
@@ -118,7 +129,7 @@ func TestListProducts(t *testing.T) {
 
 func TestListProducts_Error(t *testing.T) {
 	repo := &mockProductRepo{listErr: errors.New("db down")}
-	h := NewHandler(HandlerConfig{}, repo, &mockCouponValidator{}, &mockOrderRepo{}, &mockAPIKeyRepo{})
+	h := newTestHandler(repo, &mockCouponValidator{}, &mockOrderRepo{})
 
 	result, err := h.ListProducts(context.Background())
 	require.Error(t, err)
@@ -129,7 +140,7 @@ func TestGetProduct(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		p := newTestProduct("p1", "Widget", decimal.NewFromInt(10))
 		repo := newProductRepo(p)
-		h := NewHandler(HandlerConfig{}, repo, &mockCouponValidator{}, &mockOrderRepo{}, &mockAPIKeyRepo{})
+		h := newTestHandler(repo, &mockCouponValidator{}, &mockOrderRepo{})
 
 		result, err := h.GetProduct(context.Background(), oas.GetProductParams{ProductId: "p1"})
 		require.NoError(t, err)
@@ -142,7 +153,7 @@ func TestGetProduct(t *testing.T) {
 
 	t.Run("not found returns 404", func(t *testing.T) {
 		repo := newProductRepo() // empty
-		h := NewHandler(HandlerConfig{}, repo, &mockCouponValidator{}, &mockOrderRepo{}, &mockAPIKeyRepo{})
+		h := newTestHandler(repo, &mockCouponValidator{}, &mockOrderRepo{})
 
 		result, err := h.GetProduct(context.Background(), oas.GetProductParams{ProductId: "missing"})
 		require.NoError(t, err)
@@ -285,7 +296,7 @@ func TestPlaceOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandler(HandlerConfig{}, tt.products, tt.coupons, tt.orders, &mockAPIKeyRepo{})
+			h := newTestHandler(tt.products, tt.coupons, tt.orders)
 
 			result, err := h.PlaceOrder(context.Background(), tt.req)
 			require.NoError(t, err)
@@ -321,12 +332,10 @@ func TestPlaceOrder(t *testing.T) {
 
 func TestPlaceOrder_OrderCreateError(t *testing.T) {
 	p1 := newTestProduct("p1", "Widget", decimal.NewFromInt(10))
-	h := NewHandler(
-		HandlerConfig{},
+	h := newTestHandler(
 		newProductRepo(p1),
 		&mockCouponValidator{},
 		&mockOrderRepo{err: errors.New("db write failed")},
-		&mockAPIKeyRepo{},
 	)
 
 	req := &oas.OrderReq{
@@ -342,46 +351,42 @@ func TestPlaceOrder_OrderCreateError(t *testing.T) {
 }
 
 func TestHandleAPIKey(t *testing.T) {
-	t.Run("valid key returns context", func(t *testing.T) {
-		// Compute the SHA-256 hex hash the handler will produce for the key.
-		apiKey := "my-secret-key"
-		hash := sha256.Sum256([]byte(apiKey))
-		hexHash := hex.EncodeToString(hash[:])
+	pepper := []byte("test-pepper-secret")
 
-		h := NewHandler(
-			HandlerConfig{},
-			&mockProductRepo{},
-			&mockCouponValidator{},
-			&mockOrderRepo{},
+	t.Run("valid key returns context", func(t *testing.T) {
+		apiKey := "my-secret-key"
+		mac := hmac.New(sha256.New, pepper)
+		mac.Write([]byte(apiKey))
+		hexHash := hex.EncodeToString(mac.Sum(nil))
+
+		sh := NewSecurityHandler(
 			&mockAPIKeyRepo{
-				info: &APIKeyInfo{
+				info: &auth.APIKeyInfo{
 					ID:      "key-1",
 					KeyHash: hexHash,
 					Name:    "test-key",
 					Scopes:  []string{"orders:write"},
 				},
 			},
+			pepper,
 		)
 
 		ctx := context.Background()
-		resultCtx, err := h.HandleAPIKey(ctx, oas.PlaceOrderOperation, oas.APIKey{APIKey: apiKey})
+		resultCtx, err := sh.HandleAPIKey(ctx, oas.PlaceOrderOperation, oas.APIKey{APIKey: apiKey})
 		require.NoError(t, err)
 		assert.NotNil(t, resultCtx)
 	})
 
 	t.Run("invalid key returns error", func(t *testing.T) {
-		h := NewHandler(
-			HandlerConfig{},
-			&mockProductRepo{},
-			&mockCouponValidator{},
-			&mockOrderRepo{},
+		sh := NewSecurityHandler(
 			&mockAPIKeyRepo{
 				err: errors.New("not found"),
 			},
+			pepper,
 		)
 
 		ctx := context.Background()
-		_, err := h.HandleAPIKey(ctx, oas.PlaceOrderOperation, oas.APIKey{APIKey: "bad-key"})
+		_, err := sh.HandleAPIKey(ctx, oas.PlaceOrderOperation, oas.APIKey{APIKey: "bad-key"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unauthorized")
 	})

@@ -95,9 +95,11 @@ Start only the infrastructure:
 docker compose up -d postgres prometheus tempo grafana
 ```
 
-Seed the database with products, challenge coupons, and the default API key:
+Seed the database with products, challenge coupons, and an API key:
 
 ```bash
+export KART_SEED_API_KEY="my-secret-key"
+export KART_API_KEY_PEPPER="my-hmac-pepper"
 make seed-db
 ```
 
@@ -111,6 +113,7 @@ Run the API server:
 
 ```bash
 export KART_DATABASE_URL="postgres://kart:kart@localhost:5432/kart?sslmode=disable"
+export KART_API_KEY_PEPPER="my-hmac-pepper"
 go run ./cmd/api-server
 ```
 
@@ -126,7 +129,7 @@ curl -s http://localhost:8080/api/product/1
 # Place an order with a coupon (requires API key)
 curl -s -X POST http://localhost:8080/api/order \
   -H "Content-Type: application/json" \
-  -H "api_key: apitest" \
+  -H "api_key: $KART_SEED_API_KEY" \
   -d '{
     "items": [
       {"productId": "1", "quantity": 2},
@@ -138,7 +141,7 @@ curl -s -X POST http://localhost:8080/api/order \
 
 ## API Reference
 
-The API is defined by an [OpenAPI 3.1 specification](./_oas/openapi.yaml). All endpoints are served under the `/api` prefix.
+The API is defined by an [OpenAPI 3.1 specification](./api/openapi.yaml). All endpoints are served under the `/api` prefix.
 
 ### List Products
 
@@ -181,7 +184,7 @@ Returns a single product. Returns `404` if the product does not exist.
 POST /api/order
 ```
 
-**Authentication**: Requires the `api_key` header. Use `apitest` for the default test key.
+**Authentication**: Requires the `api_key` header. Use the key you set via `KART_SEED_API_KEY` when seeding the database.
 
 **Request body**:
 
@@ -227,13 +230,15 @@ POST /api/order
 
 ### Authentication
 
-API key authentication uses SHA-256 hashing with constant-time comparison:
+API key authentication uses HMAC-SHA256 with a server-side pepper and constant-time comparison:
 
 1. The client sends the raw key in the `api_key` header.
-2. The server hashes it with SHA-256 and looks up the hash in the `api_keys` table.
+2. The server computes `HMAC-SHA256(pepper, key)` and looks up the resulting hash in the `api_keys` table.
 3. A constant-time comparison (`crypto/subtle.ConstantTimeCompare`) guards against timing side-channels.
 
-The default test key `apitest` is seeded by `cmd/seed-db`.
+The pepper is configured via the `KART_API_KEY_PEPPER` environment variable. If the database is leaked without the pepper, the API key hashes cannot be reversed or brute-forced offline.
+
+API keys are seeded by `cmd/seed-db` using `KART_SEED_API_KEY` (no hardcoded default).
 
 ### Rate Limiting
 
@@ -336,6 +341,7 @@ Configuration is loaded via `cristalhq/aconfig` with the following priority (hig
 | Variable              | Default         | Description                          |
 |-----------------------|-----------------|--------------------------------------|
 | `KART_DATABASE_URL`   | *(required)*    | PostgreSQL connection URL            |
+| `KART_API_KEY_PEPPER` | *(empty)*       | HMAC pepper for API key hashing      |
 | `KART_ADDR`           | `0.0.0.0:8080`  | API server listen address            |
 | `KART_IMAGE_BASE_URL` | *(empty)*       | Base URL for product images          |
 | `KART_RATE_LIMIT_MAX` | `100`           | Max requests per rate limit window   |
@@ -391,59 +397,75 @@ The readiness probe is used in the graceful shutdown sequence: readiness is set 
 ## Project Structure
 
 ```
-_oas/openapi.yaml              OpenAPI 3.1 specification
-cmd/
-  api-server/                  Main API server entry point
-    main.go                    Server setup, wiring, graceful shutdown
-    config.go                  Configuration struct with aconfig tags
-  seed-db/                     Database seeding (products, coupons, API key)
-  coupon-ingest/               Bloom filter coupon ingestion pipeline
-internal/
-  api/                         HTTP handlers and security
-    handler.go                 Handler struct, dependency injection
-    product.go                 ListProducts, GetProduct handlers
-    order.go                   PlaceOrder handler with coupon + decimal math
-    security.go                SHA-256 API key authentication
-  coupon/                      Coupon domain
-    coupon.go                  Types: Rule, Discount, Item, DiscountType
-    discount.go                Apply logic: percentage, fixed, free_lowest
-    validator.go               RepoValidator wrapping Repository + Apply
-  order/                       Order domain types
-  product/                     Product domain types
-  postgres/                    PostgreSQL repository implementations
-    postgres.go                Pool creation, embedded migrations
-    product.go                 product.Repository implementation
-    coupon.go                  coupon.Repository implementation
-    order.go                   order.Repository implementation
-    apikey.go                  API key lookup by SHA-256 hash
-  oas/                         Generated ogen code (do not edit)
-  dbgen/                       Generated sqlc code (do not edit)
-pkg/
-  httpmiddleware/              HTTP middleware stack
-    httpmiddleware.go          Wrap, InjectLogger, Labeler, Instrument, LogRequests
-    cors.go                    CORS middleware
-    ratelimit.go               Sliding window rate limiter
-    requestid.go               X-Request-ID injection
-    ogen.go                    ogen RouteFinder adapter
-  health/                      Kubernetes-style health check package
-    health.go                  Health service with background check runners
-    checkers.go                Built-in check functions (goroutine count, etc.)
+api/
+  openapi.yaml                   OpenAPI 3.1 specification (source for codegen)
+
+gen/
+  oas/                           Generated ogen HTTP layer (do not edit)
+  sqlc/                          Generated sqlc DB layer (do not edit)
+
 db/
-  migrations/001_schema.sql    DDL: products, coupons, orders, api_keys tables
-  queries/                     sqlc SQL queries (product, coupon, order, apikey)
-  seed/products.json           Product catalog seed data
-deploy/                        Observability configs
-  prometheus.yml               Prometheus scrape configuration
-  tempo.yml                    Tempo trace backend configuration
-  grafana/datasources.yml      Grafana datasource provisioning
-scripts/
-  download-coupons.sh          Downloads couponbase{1,2,3}.gz from S3
-config.yaml                    Default application configuration
-docker-compose.yml             Full stack: PostgreSQL, API, Prometheus, Tempo, Grafana
-Dockerfile                     Multi-stage build (Go 1.25 alpine)
-Makefile                       Build, test, lint, seed, ingest targets
-sqlc.yaml                      sqlc code generation configuration
-gen.go                         go:generate directive for ogen
+  embed.go                       Exports embedded schema (db.Schema)
+  migrations/001_schema.sql      DDL: products, coupons, orders, api_keys tables
+  queries/                       sqlc SQL queries (product, coupon, order, apikey)
+  seed/products.json             Product catalog seed data
+
+cmd/
+  api-server/main.go             Minimal entry point: LoadConfig → app.Run
+  seed-db/main.go                Database seeding (products, coupons, API key)
+  coupon-ingest/main.go          Bloom filter coupon ingestion pipeline
+
+internal/
+  app/                           Application wiring and lifecycle
+    app.go                       Run: pool, migrations, repos, services, server, shutdown
+    config.go                    Config struct + LoadConfig (aconfig + YAML)
+  domain/
+    product/product.go           Product, Image, Repository, ErrNotFound
+    order/
+      order.go                   Order, OrderItem, Repository
+      service.go                 PlaceOrder business logic (no OAS types)
+      service_test.go            Pure domain unit tests
+    coupon/
+      coupon.go                  Rule, Discount, Item, DiscountType, Repository
+      discount.go                Apply: percentage, fixed, free_lowest
+      discount_test.go           Discount calculation tests
+      validator.go               RepoValidator wrapping Repository + Apply
+      validator_test.go          Validator tests
+    auth/
+      apikey.go                  APIKeyInfo, Repository interface
+  handler/                       Thin HTTP handlers (OAS ↔ domain conversion)
+    handler.go                   Handler struct (products, orderService)
+    product.go                   ListProducts, GetProduct
+    order.go                     PlaceOrder: parse → service → response
+    security.go                  SecurityHandler (HMAC-SHA256 with pepper)
+    handler_test.go              Handler + security unit tests
+  storage/
+    postgres/                    PostgreSQL repository implementations
+      postgres.go                Pool creation + RunMigrations (uses db.Schema)
+      product.go                 product.Repository implementation
+      coupon.go                  coupon.Repository implementation
+      order.go                   order.Repository implementation
+      apikey.go                  auth.Repository implementation
+
+pkg/
+  httpmiddleware/                HTTP middleware stack
+    httpmiddleware.go            Wrap, InjectLogger, Labeler, Instrument, LogRequests
+    recovery.go                  Panic recovery middleware
+    cors.go                      CORS middleware
+    ratelimit.go                 Sliding window rate limiter
+    requestid.go                 X-Request-ID injection
+    ogen.go                      ogen RouteFinder adapter
+  health/                        Kubernetes-style health check package
+    health.go                    Health service with background check runners
+    checkers.go                  Built-in check functions (goroutine count, etc.)
+
+deploy/                          Observability configs (Prometheus, Tempo, Grafana)
+tests/integration/               Integration tests (Docker Compose + testcontainers)
+config.yaml                      Default application configuration
+Dockerfile                       Multi-stage build (Go 1.25 alpine)
+Makefile                         Build, test, lint, seed, ingest targets
+sqlc.yaml                        sqlc code generation config
+gen.go                           go:generate directive for ogen
 ```
 
 ## Commands
@@ -474,9 +496,9 @@ All pricing and discount calculations use `decimal.Decimal` instead of `float64`
 
 Instead of loading all ~313M codes into memory (which would require tens of gigabytes), the pipeline uses bloom filters at ~170MB each. Two passes over the data identify codes appearing in 2+ files with high confidence. The 0.1% false positive rate is acceptable because the candidate set is tiny (8 codes out of 313M).
 
-### Repository pattern
+### Clean architecture with domain layer
 
-Domain types (`product.Product`, `order.Order`, `coupon.Rule`) and repository interfaces live in their own packages, decoupled from the PostgreSQL implementation. This keeps the API handlers testable without a database.
+Domain types, interfaces, and business logic live under `internal/domain/` with no imports from generated code (`gen/oas`, `gen/sqlc`). The storage layer imports domain (correct dependency direction). HTTP handlers are thin: they convert OAS types to domain types, call the domain service, and map results back. This keeps business logic testable without HTTP or database concerns.
 
 ### Single server with push telemetry
 

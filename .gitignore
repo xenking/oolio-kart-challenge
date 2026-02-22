@@ -8,9 +8,9 @@
 *.out
 
 # Go build output
-api-server
-seed-db
-coupon-ingest
+/api-server
+/seed-db
+/coupon-ingest
 
 # Coverage
 coverage.*

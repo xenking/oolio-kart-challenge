@@ -18,6 +18,7 @@ services:
       - "8080"
     environment:
       KART_DATABASE_URL: postgres://kart:kart@postgres:5432/kart?sslmode=disable
+      KART_API_KEY_PEPPER: test-pepper-for-integration
       OTEL_TRACES_EXPORTER: none
       OTEL_METRICS_EXPORTER: none
       KART_RATE_LIMIT_MAX: "1000"

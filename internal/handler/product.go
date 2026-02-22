@@ -1,12 +1,12 @@
-package api
+package handler
 
 import (
 	"context"
 
 	"github.com/go-faster/errors"
 
-	"github.com/xenking/oolio-kart-challenge/internal/oas"
-	"github.com/xenking/oolio-kart-challenge/internal/product"
+	"github.com/xenking/oolio-kart-challenge/gen/oas"
+	"github.com/xenking/oolio-kart-challenge/internal/domain/product"
 )
 
 // ListProducts returns every product in the catalog.

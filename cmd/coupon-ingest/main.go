@@ -17,8 +17,8 @@ import (
 	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/xenking/oolio-kart-challenge/internal/dbgen"
-	"github.com/xenking/oolio-kart-challenge/internal/postgres"
+	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
+	"github.com/xenking/oolio-kart-challenge/internal/storage/postgres"
 )
 
 const (
@@ -133,7 +133,7 @@ func run(ctx context.Context, dataDir, databaseURL string) error {
 	}
 	defer pool.Close()
 
-	if err := writeCoupons(ctx, dbgen.New(pool), validCodes); err != nil {
+	if err := writeCoupons(ctx, sqlc.New(pool), validCodes); err != nil {
 		return errors.Wrap(err, "write coupons to database")
 	}
 
@@ -299,7 +299,7 @@ func streamGzFile(ctx context.Context, path string, fn func(code string)) error 
 }
 
 // writeCoupons upserts all valid coupon codes into the database.
-func writeCoupons(ctx context.Context, queries *dbgen.Queries, codes []string) error {
+func writeCoupons(ctx context.Context, queries *sqlc.Queries, codes []string) error {
 	slog.Info("writing coupons to database", slog.Int("count", len(codes)))
 
 	for i, code := range codes {
@@ -313,7 +313,7 @@ func writeCoupons(ctx context.Context, queries *dbgen.Queries, codes []string) e
 			return errors.Wrapf(err, "parse decimal value for code %s", code)
 		}
 
-		if err := queries.UpsertCoupon(ctx, dbgen.UpsertCouponParams{
+		if err := queries.UpsertCoupon(ctx, sqlc.UpsertCouponParams{
 			Code:         code,
 			DiscountType: rule.discountType,
 			Value:        value,
