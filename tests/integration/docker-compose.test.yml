@@ -13,7 +13,7 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: Dockerfile.test
+      dockerfile: Dockerfile.coverage
     stop_signal: SIGINT
     ports:
       - "8080"
