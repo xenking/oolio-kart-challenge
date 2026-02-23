@@ -81,16 +81,15 @@ func testMain(m *testing.M) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// Create coverage output directory for the instrumented binary.
+	if err := os.MkdirAll("coverdir", 0o777); err != nil {
+		log.Fatalf("create coverdir: %v", err)
+	}
+
 	dc, err := tc.NewDockerCompose("docker-compose.test.yml")
 	if err != nil {
 		log.Fatalf("compose init: %v", err)
 	}
-
-	defer func() {
-		if err := dc.Down(context.Background(), tc.RemoveOrphans(true), tc.RemoveVolumes(true)); err != nil {
-			log.Printf("compose down: %v", err)
-		}
-	}()
 
 	// Start postgres + api, wait until the API health check passes.
 	err = dc.
@@ -140,7 +139,22 @@ func testMain(m *testing.M) int {
 		log.Fatalf("wait for seed: %v", err)
 	}
 
-	return m.Run()
+	result := m.Run()
+
+	// Stop the API container gracefully so the coverage-instrumented binary
+	// flushes coverage data to GOCOVERDIR (bind-mounted to ./coverdir).
+	// The compose file sets stop_signal: SIGINT because app.Run handles
+	// SIGINT (not SIGTERM) for graceful shutdown.
+	stopTimeout := 30 * time.Second
+	if err := apiContainer.Stop(ctx, &stopTimeout); err != nil {
+		log.Printf("stop api container: %v", err)
+	}
+
+	if err := dc.Down(context.Background(), tc.RemoveOrphans(true)); err != nil {
+		log.Printf("compose down: %v", err)
+	}
+
+	return result
 }
 
 // waitForSeededData polls the product list until all 9 seeded products appear.

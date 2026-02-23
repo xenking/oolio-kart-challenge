@@ -35,6 +35,20 @@ func (m *mockProductRepo) GetByID(_ context.Context, id string) (*product.Produc
 	return p, nil
 }
 
+func (m *mockProductRepo) GetByIDs(_ context.Context, ids []string) ([]product.Product, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	var result []product.Product
+	for _, id := range ids {
+		p, ok := m.byID[id]
+		if ok {
+			result = append(result, *p)
+		}
+	}
+	return result, nil
+}
+
 type mockCouponValidator struct {
 	discount *coupon.Discount
 	err      error

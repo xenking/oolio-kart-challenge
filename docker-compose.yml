@@ -17,6 +17,7 @@ services:
     ports: ["8080:8080"]
     environment:
       KART_DATABASE_URL: postgres://kart:kart@postgres:5432/kart?sslmode=disable
+      KART_API_KEY_PEPPER: dev-pepper-not-for-production
       # Traces: push via gRPC to Tempo.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -36,6 +37,17 @@ services:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
       interval: 10s
       retries: 3
+
+  seed:
+    build: .
+    entrypoint: ["/app/seed-db"]
+    environment:
+      DATABASE_URL: postgres://kart:kart@postgres:5432/kart?sslmode=disable
+      KART_SEED_API_KEY: dev-api-key-not-for-production
+      KART_API_KEY_PEPPER: dev-pepper-not-for-production
+    depends_on:
+      api: { condition: service_healthy }
+    restart: "no"
 
   prometheus:
     image: prom/prometheus:v3.2.1

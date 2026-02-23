@@ -233,6 +233,54 @@ func TestApply(t *testing.T) {
 			},
 			wantErr: ErrInvalidCoupon,
 		},
+		{
+			name: "max discount caps percentage discount",
+			rule: &Rule{
+				Code:         "CAP20",
+				DiscountType: DiscountPercentage,
+				Value:        d("50"),
+				MaxDiscount:  d("20"),
+				Description:  "50% off, max $20",
+			},
+			items: []Item{
+				{ProductID: "p1", Price: d("100"), Quantity: 1},
+			},
+			// 50% of 100 = 50, capped at 20
+			wantAmount: d("20"),
+			wantDesc:   "50% off, max $20",
+		},
+		{
+			name: "max discount does not increase smaller discount",
+			rule: &Rule{
+				Code:         "CAP50",
+				DiscountType: DiscountFixed,
+				Value:        d("10"),
+				MaxDiscount:  d("50"),
+				Description:  "$10 off, max $50",
+			},
+			items: []Item{
+				{ProductID: "p1", Price: d("100"), Quantity: 1},
+			},
+			// fixed $10 < cap $50, stays at $10
+			wantAmount: d("10"),
+			wantDesc:   "$10 off, max $50",
+		},
+		{
+			name: "max discount zero means no cap",
+			rule: &Rule{
+				Code:         "NOCAP",
+				DiscountType: DiscountPercentage,
+				Value:        d("50"),
+				MaxDiscount:  decimal.Zero,
+				Description:  "50% off",
+			},
+			items: []Item{
+				{ProductID: "p1", Price: d("200"), Quantity: 1},
+			},
+			// 50% of 200 = 100, no cap
+			wantAmount: d("100"),
+			wantDesc:   "50% off",
+		},
 	}
 
 	for _, tt := range tests {

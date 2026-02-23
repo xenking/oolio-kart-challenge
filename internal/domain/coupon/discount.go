@@ -12,7 +12,8 @@ var (
 
 // Apply calculates the discount for the given rule and cart items.
 // It returns ErrInvalidCoupon when the cart does not satisfy the rule's
-// minimum item count requirement.
+// minimum item count requirement. When MaxDiscount > 0, the computed
+// discount is clamped to that ceiling.
 func Apply(rule *Rule, items []Item) (Discount, error) {
 	totalQty := totalQuantity(items)
 	if rule.MinItems > 0 && totalQty < rule.MinItems {
@@ -21,16 +22,25 @@ func Apply(rule *Rule, items []Item) (Discount, error) {
 
 	subtotal := calcSubtotal(items)
 
+	var d Discount
+
 	switch rule.DiscountType {
 	case DiscountPercentage:
-		return applyPercentage(rule, subtotal), nil
+		d = applyPercentage(rule, subtotal)
 	case DiscountFixed:
-		return applyFixed(rule, subtotal), nil
+		d = applyFixed(rule, subtotal)
 	case DiscountFreeLowest:
-		return applyFreeLowest(rule, items), nil
+		d = applyFreeLowest(rule, items)
 	default:
 		return Discount{}, errors.Errorf("unsupported discount type: %q", rule.DiscountType)
 	}
+
+	// Clamp to MaxDiscount when set.
+	if rule.MaxDiscount.IsPositive() && d.Amount.GreaterThan(rule.MaxDiscount) {
+		d.Amount = rule.MaxDiscount.Round(2)
+	}
+
+	return d, nil
 }
 
 func applyPercentage(rule *Rule, subtotal decimal.Decimal) Discount {

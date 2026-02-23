@@ -13,12 +13,12 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/go-faster/errors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	pgzip "github.com/klauspost/pgzip"
 	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
-	"github.com/xenking/oolio-kart-challenge/internal/storage/postgres"
+	"github.com/xenking/oolio-kart-challenge/internal/repository"
 )
 
 const (
@@ -34,7 +34,7 @@ const (
 type codeRule struct {
 	discountType string
 	value        string
-	minItems     int32
+	minItems     int
 	description  string
 }
 
@@ -127,13 +127,13 @@ func run(ctx context.Context, dataDir, databaseURL string) error {
 	// Write valid codes to database.
 	slog.Info("connecting to database")
 
-	pool, err := postgres.NewPool(ctx, databaseURL)
+	pool, err := repository.NewPool(ctx, databaseURL)
 	if err != nil {
 		return errors.Wrap(err, "connect to database")
 	}
 	defer pool.Close()
 
-	if err := writeCoupons(ctx, sqlc.New(pool), validCodes); err != nil {
+	if err := writeCoupons(ctx, pool, validCodes); err != nil {
 		return errors.Wrap(err, "write coupons to database")
 	}
 
@@ -298,8 +298,15 @@ func streamGzFile(ctx context.Context, path string, fn func(code string)) error 
 	return nil
 }
 
+const upsertCouponSQL = `INSERT INTO coupons (code, discount_type, value, min_items, description, active)
+	VALUES ($1, $2, $3, $4, $5, $6)
+	ON CONFLICT (code) DO UPDATE SET
+		discount_type = EXCLUDED.discount_type, value = EXCLUDED.value,
+		min_items = EXCLUDED.min_items, description = EXCLUDED.description,
+		active = EXCLUDED.active`
+
 // writeCoupons upserts all valid coupon codes into the database.
-func writeCoupons(ctx context.Context, queries *sqlc.Queries, codes []string) error {
+func writeCoupons(ctx context.Context, pool *pgxpool.Pool, codes []string) error {
 	slog.Info("writing coupons to database", slog.Int("count", len(codes)))
 
 	for i, code := range codes {
@@ -313,14 +320,9 @@ func writeCoupons(ctx context.Context, queries *sqlc.Queries, codes []string) er
 			return errors.Wrapf(err, "parse decimal value for code %s", code)
 		}
 
-		if err := queries.UpsertCoupon(ctx, sqlc.UpsertCouponParams{
-			Code:         code,
-			DiscountType: rule.discountType,
-			Value:        value,
-			MinItems:     rule.minItems,
-			Description:  rule.description,
-			Active:       true,
-		}); err != nil {
+		if _, err := pool.Exec(ctx, upsertCouponSQL,
+			code, rule.discountType, value, rule.minItems, rule.description, true,
+		); err != nil {
 			return errors.Wrapf(err, "upsert coupon %s", code)
 		}
 

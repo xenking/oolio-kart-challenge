@@ -1,4 +1,4 @@
-package postgres
+package repository
 
 import (
 	"context"
@@ -8,37 +8,35 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
 	"github.com/xenking/oolio-kart-challenge/internal/domain/auth"
 )
+
+const getAPIKeyByHashSQL = `SELECT id, key_hash, name, scopes
+	FROM api_keys WHERE key_hash = $1 AND active = TRUE`
 
 var _ auth.Repository = (*APIKeyRepository)(nil)
 
 // APIKeyRepository provides API key lookups backed by PostgreSQL.
 type APIKeyRepository struct {
-	q *sqlc.Queries
+	pool *pgxpool.Pool
 }
 
 // NewAPIKeyRepository returns an APIKeyRepository that uses the given pool.
 func NewAPIKeyRepository(pool *pgxpool.Pool) *APIKeyRepository {
-	return &APIKeyRepository{q: sqlc.New(pool)}
+	return &APIKeyRepository{pool: pool}
 }
 
 // FindByHash looks up an active API key by its HMAC-SHA256 hash.
-// Returns an error wrapping pgx.ErrNoRows when no matching key exists.
 func (r *APIKeyRepository) FindByHash(ctx context.Context, hash string) (*auth.APIKeyInfo, error) {
-	row, err := r.q.GetAPIKeyByHash(ctx, hash)
+	var info auth.APIKeyInfo
+	err := r.pool.QueryRow(ctx, getAPIKeyByHashSQL, hash).Scan(
+		&info.ID, &info.KeyHash, &info.Name, &info.Scopes,
+	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("api key not found: %w", err)
 		}
 		return nil, fmt.Errorf("finding api key by hash: %w", err)
 	}
-
-	return &auth.APIKeyInfo{
-		ID:      row.ID,
-		KeyHash: row.KeyHash,
-		Name:    row.Name,
-		Scopes:  row.Scopes,
-	}, nil
+	return &info, nil
 }

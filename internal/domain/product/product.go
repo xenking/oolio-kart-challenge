@@ -31,4 +31,5 @@ type Image struct {
 type Repository interface {
 	List(ctx context.Context) ([]Product, error)
 	GetByID(ctx context.Context, id string) (*Product, error)
+	GetByIDs(ctx context.Context, ids []string) ([]Product, error)
 }

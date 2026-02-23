@@ -18,12 +18,13 @@ jobs:
           cache: true
 
       - name: Run tests with coverage
-        run: go test -race -count=1 -coverprofile=coverage.txt -covermode=atomic -coverpkg=./... ./...
+        run: go test -race -count=1 -coverprofile=coverage-unit.txt -covermode=atomic -coverpkg=./internal/...,./pkg/... ./...
 
-      - name: Upload coverage to Codecov
+      - name: Upload unit coverage
         uses: codecov/codecov-action@v5
         with:
-          files: coverage.txt
+          files: coverage-unit.txt
+          flags: unit
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -53,8 +54,29 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+
       - name: Run integration tests
-        run: make test-integration
+        run: go test -v -tags integration -count=1 -timeout 5m ./tests/integration/
+
+      - name: Convert integration coverage
+        if: always()
+        run: |
+          COVDIR=tests/integration/coverdir
+          if [ -d "$COVDIR" ] && [ "$(ls -A "$COVDIR" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="$COVDIR" -o=coverage-integration.txt
+            echo "Integration coverage converted"
+          else
+            echo "No integration coverage data found"
+          fi
+
+      - name: Upload integration coverage
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage-integration.txt
+          flags: integration
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   docker:
     name: Docker

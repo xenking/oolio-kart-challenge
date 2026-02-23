@@ -3,133 +3,26 @@
 [![CI](https://github.com/xenking/oolio-kart-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/xenking/oolio-kart-challenge/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/xenking/oolio-kart-challenge/branch/main/graph/badge.svg)](https://codecov.io/gh/xenking/oolio-kart-challenge)
 
-A production-ready Go backend for the Oolio Kart food ordering challenge. It provides a product catalog API, order placement with coupon validation, API key authentication, and a data engineering pipeline that processes ~313 million coupon codes to extract 8 valid promo codes.
+Go backend for the Oolio Kart food ordering challenge. Product catalog, order placement with coupon discounts, API key auth, and a data pipeline that finds 8 valid promo codes in ~313 million coupon entries.
 
-## Table of Contents
-
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-- [Coupon System](#coupon-system)
-- [Data Ingestion Pipeline](#data-ingestion-pipeline)
-- [Configuration](#configuration)
-- [Observability](#observability)
-- [Project Structure](#project-structure)
-- [Commands](#commands)
-- [Design Decisions](#design-decisions)
-- [License](#license)
-
-## Architecture
-
-The application runs a single HTTP server with health probes, middleware, and push-based telemetry:
-
-```
-                    :8080 (API Server)
-                   ┌─────────────────┐
-                   │  /livez /readyz │
-                   │  CORS           │
-  Clients ──────>  │  Rate Limiting  │──── OTLP push ───> Prometheus (metrics)
-                   │  Request IDs    │──── OTLP push ───> Tempo (traces)
-                   │  OTel Tracing   │──── Push ────────> Pyroscope (profiles)
-                   │  Request Logger │
-                   └────────┬────────┘
-                            │
-                   ┌────────▼────────┐
-                   │  ogen-generated │
-                   │  Router + Codec │
-                   └────────┬────────┘
-                            │
-              ┌─────────────┼──────────────┐
-              │             │              │
-     ┌────────▼──┐  ┌───────▼───┐  ┌──────▼─────┐
-     │  Product  │  │   Order   │  │  Security  │
-     │  Handler  │  │  Handler  │  │  Handler   │
-     └─────┬─────┘  └─────┬─────┘  └──────┬─────┘
-           │               │               │
-     ┌─────▼─────┐  ┌─────▼─────┐  ┌──────▼─────┐
-     │  product  │  │   order   │  │   coupon   │
-     │   .Repo   │  │   .Repo   │  │ .Validator │
-     └─────┬─────┘  └─────┬─────┘  └──────┬─────┘
-           │               │               │
-           └───────────────┼───────────────┘
-                           │
-                  ┌────────▼────────┐
-                  │   PostgreSQL    │
-                  │  (pgx/v5 pool) │
-                  └─────────────────┘
-```
-
-Separating public API traffic from internal operational endpoints means health checks and Prometheus scraping are never rate-limited, and the internal port can be firewalled in production.
-
-## Prerequisites
-
-- **Go 1.25+**
-- **Docker** and **Docker Compose** (for PostgreSQL and observability stack)
-- **Make** (optional, for convenience targets)
-- **curl** (for downloading coupon data files)
+For design decisions, data pipeline details, and developer guides, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Quick Start
 
-### Option A: Docker Compose (recommended)
-
-Start the full stack including PostgreSQL, the API, Prometheus, Tempo, and Grafana:
-
 ```bash
 make up
+# wait ~15s for postgres + api + seed
+curl http://localhost:8080/api/product | head -c 200
 ```
 
-This builds the Docker image, runs migrations, and starts all services. The API is available at `http://localhost:8080`.
+That's it. `make up` builds the Docker image, starts Postgres, the API, seeds products/coupons/API key, and brings up the observability stack (Prometheus, Tempo, Pyroscope, Grafana).
 
-To stop everything:
-
-```bash
-make down
-```
-
-### Option B: Local development
-
-Start only the infrastructure:
+To place an order:
 
 ```bash
-docker compose up -d postgres prometheus tempo grafana
-```
-
-Seed the database with products, challenge coupons, and an API key:
-
-```bash
-export KART_SEED_API_KEY="my-secret-key"
-export KART_API_KEY_PEPPER="my-hmac-pepper"
-make seed-db
-```
-
-Optionally, download and ingest the data-derived coupon codes:
-
-```bash
-make ingest-coupons
-```
-
-Run the API server:
-
-```bash
-export KART_DATABASE_URL="postgres://kart:kart@localhost:5432/kart?sslmode=disable"
-export KART_API_KEY_PEPPER="my-hmac-pepper"
-go run ./cmd/api-server
-```
-
-### Verify it works
-
-```bash
-# List all products
-curl -s http://localhost:8080/api/product | head -c 200
-
-# Get a single product
-curl -s http://localhost:8080/api/product/1
-
-# Place an order with a coupon (requires API key)
-curl -s -X POST http://localhost:8080/api/order \
+curl -X POST http://localhost:8080/api/order \
   -H "Content-Type: application/json" \
-  -H "api_key: $KART_SEED_API_KEY" \
+  -H "api_key: dev-api-key-not-for-production" \
   -d '{
     "items": [
       {"productId": "1", "quantity": 2},
@@ -139,146 +32,106 @@ curl -s -X POST http://localhost:8080/api/order \
   }'
 ```
 
-## API Reference
+To stop: `make down`.
 
-The API is defined by an [OpenAPI 3.1 specification](./api/openapi.yaml). All endpoints are served under the `/api` prefix.
+### Local Development
 
-### List Products
-
-```
-GET /api/product
-```
-
-Returns an array of all products in the catalog. No authentication required.
-
-**Response** `200 OK`:
-
-```json
-[
-  {
-    "id": "1",
-    "name": "Waffle with Berries",
-    "price": 6.5,
-    "category": "Waffle",
-    "image": {
-      "thumbnail": "https://orderfoodonline.deno.dev/public/images/image-waffle-thumbnail.jpg",
-      "mobile": "https://orderfoodonline.deno.dev/public/images/image-waffle-mobile.jpg",
-      "tablet": "https://orderfoodonline.deno.dev/public/images/image-waffle-tablet.jpg",
-      "desktop": "https://orderfoodonline.deno.dev/public/images/image-waffle-desktop.jpg"
-    }
-  }
-]
+```bash
+docker compose up -d postgres
+export DATABASE_URL="postgres://kart:kart@localhost:5432/kart?sslmode=disable"
+export KART_SEED_API_KEY="my-secret-key"
+export KART_API_KEY_PEPPER="my-hmac-pepper"
+make seed-db
+go run ./cmd/api-server
 ```
 
-### Get Product by ID
+## Architecture
 
 ```
-GET /api/product/{productId}
+            Request
+               │
+     ┌─────────▼──────────┐
+     │   ogen Router      │  ← generated from OpenAPI 3.1 spec
+     │   + middleware     │    (CORS, rate limit, request ID, tracing)
+     └─────────┬──────────┘
+               │
+     ┌─────────▼──────────┐
+     │   handler layer    │  ← converts OAS types ↔ domain types
+     └─────────┬──────────┘
+               │
+     ┌─────────▼──────────┐
+     │   domain layer     │  ← business logic, zero external imports
+     │   product/order/   │
+     │   coupon/auth      │
+     └─────────┬──────────┘
+               │
+     ┌─────────▼──────────┐
+     │   repository       │  ← plain pgx, SQL constants, direct scanning
+     └─────────┬──────────┘
+               │
+          PostgreSQL
 ```
 
-Returns a single product. Returns `404` if the product does not exist.
+The dependency arrow always points inward: repository imports domain, never the reverse. Handlers are thin translation layers. Business rules live in `internal/domain/` where they can be tested without HTTP or database concerns.
 
-### Place Order
+### Why plain pgx instead of sqlc
 
-```
-POST /api/order
-```
+Nine queries. The overhead of a codegen step and double-mapping (pgx row → sqlc struct → domain struct) wasn't paying for itself. With plain pgx we scan directly into domain types, SQL lives next to the code that uses it, and there's one less tool in the build chain.
 
-**Authentication**: Requires the `api_key` header. Use the key you set via `KART_SEED_API_KEY` when seeding the database.
+### Why ogen stays
 
-**Request body**:
+The HTTP layer is a different story. ogen generates the router, request/response codecs, validation, and OpenTelemetry instrumentation from the OpenAPI spec. That's real leverage -- removing it would mean hand-writing hundreds of lines of boilerplate and keeping the spec in sync manually.
 
-```json
-{
-  "items": [
-    { "productId": "1", "quantity": 2 },
-    { "productId": "3", "quantity": 1 }
-  ],
-  "couponCode": "HAPPYHOURS"
-}
-```
+## API
 
-| Field        | Type     | Required | Description                        |
-|--------------|----------|----------|------------------------------------|
-| `items`      | array    | Yes      | At least one item                  |
-| `items[].productId` | string | Yes | Product ID from the catalog       |
-| `items[].quantity`   | int    | Yes | Must be >= 1                      |
-| `couponCode` | string   | No       | Optional promo code for a discount |
+Defined in [`api/openapi.yaml`](./api/openapi.yaml). All endpoints under `/api`.
 
-**Response** `200 OK`:
+| Method | Path                   | Auth | Description              |
+|--------|------------------------|------|--------------------------|
+| GET    | `/api/product`         | No   | List all products        |
+| GET    | `/api/product/{id}`    | No   | Get product by ID        |
+| POST   | `/api/order`           | Yes  | Place an order           |
 
-```json
-{
-  "id": "a1b2c3d4-...",
-  "total": 10.66,
-  "discounts": 2.34,
-  "items": [
-    { "productId": "1", "quantity": 2 },
-    { "productId": "3", "quantity": 1 }
-  ],
-  "products": [ ... ]
-}
-```
+Authentication: send the raw key in the `api_key` header. The server computes `HMAC-SHA256(pepper, key)` and does a constant-time lookup against stored hashes. If the database leaks without the pepper, key hashes can't be reversed.
 
-**Error responses**:
-
-| Status | Condition                                |
-|--------|------------------------------------------|
-| `400`  | Empty items array                        |
-| `401`  | Missing or invalid API key               |
-| `422`  | Invalid product ID, quantity, or coupon  |
-
-### Authentication
-
-API key authentication uses HMAC-SHA256 with a server-side pepper and constant-time comparison:
-
-1. The client sends the raw key in the `api_key` header.
-2. The server computes `HMAC-SHA256(pepper, key)` and looks up the resulting hash in the `api_keys` table.
-3. A constant-time comparison (`crypto/subtle.ConstantTimeCompare`) guards against timing side-channels.
-
-The pepper is configured via the `KART_API_KEY_PEPPER` environment variable. If the database is leaked without the pepper, the API key hashes cannot be reversed or brute-forced offline.
-
-API keys are seeded by `cmd/seed-db` using `KART_SEED_API_KEY` (no hardcoded default).
-
-### Rate Limiting
-
-All API server responses include rate limit headers:
-
-| Header                  | Description                           |
-|-------------------------|---------------------------------------|
-| `X-RateLimit-Limit`     | Maximum requests per window (default: 100) |
-| `X-RateLimit-Remaining` | Remaining requests in current window  |
-| `X-RateLimit-Reset`     | Unix timestamp when the window resets |
-| `Retry-After`           | Seconds to wait (only on `429`)       |
-
-The rate limiter uses a sliding window algorithm keyed by client IP (extracted from `X-Forwarded-For`, `X-Real-IP`, or `RemoteAddr`).
+Error responses: `400` for empty items, `401` for bad/missing key, `422` for invalid product, quantity, or coupon.
 
 ## Coupon System
 
-### Discount Types
+Three discount strategies, all computed with `shopspring/decimal`:
 
-The coupon engine supports three discount strategies, all computed with `shopspring/decimal` to avoid floating-point rounding errors:
+| Type           | Behavior                                           |
+|----------------|----------------------------------------------------|
+| `percentage`   | N% off the subtotal                                |
+| `fixed`        | Flat amount off, capped at the subtotal            |
+| `free_lowest`  | Removes the cheapest item's price from the cart    |
 
-| Type           | Behavior                                              |
-|----------------|-------------------------------------------------------|
-| `percentage`   | Applies N% off the subtotal                           |
-| `fixed`        | Subtracts a fixed amount, capped at the subtotal      |
-| `free_lowest`  | Removes the cost of the cheapest item in the cart     |
+### Extensibility
 
-Discounts are floored at zero (an order total can never go negative) and rounded to 2 decimal places.
+Coupons support temporal validity and usage limits without schema changes:
 
-### Challenge Coupons (seeded)
+| Column        | Type           | Default | Meaning                           |
+|---------------|----------------|---------|-----------------------------------|
+| `valid_from`  | `TIMESTAMPTZ`  | NULL    | NULL = always valid from the start |
+| `valid_until` | `TIMESTAMPTZ`  | NULL    | NULL = never expires              |
+| `max_uses`    | `INTEGER`      | 0       | 0 = unlimited                     |
+| `uses`        | `INTEGER`      | 0       | Current redemption count          |
+| `max_discount`| `NUMERIC(10,2)`| 0       | 0 = no cap; otherwise clamps discount |
 
-These are seeded by `cmd/seed-db` and satisfy the challenge requirements:
+The validator checks these in order: temporal window, usage limit, min items, discount calculation, max discount cap, then increments the usage counter.
 
-| Code         | Type          | Value | Min Items | Description                         |
-|--------------|---------------|-------|-----------|-------------------------------------|
-| `HAPPYHOURS` | percentage    | 18    | 0         | Happy Hours: 18% off entire order   |
-| `BUYGETONE`  | free_lowest   | 0     | 2         | Buy one get one: lowest item free   |
+To add a new constraint (e.g., per-user limits, product category restrictions), add a field to `coupon.Rule` and a check in `validator.go`. No interface changes needed.
 
-### Data-Derived Coupons (from gz files)
+### Seeded Coupons
 
-Eight codes found in 2+ files out of ~313 million total, ingested by `cmd/coupon-ingest`:
+| Code         | Type          | Value | Min Items | Description                        |
+|--------------|---------------|-------|-----------|------------------------------------|
+| `HAPPYHOURS` | percentage    | 18    | 0         | Happy Hours: 18% off entire order  |
+| `BUYGETONE`  | free_lowest   | 0     | 2         | Buy one get one: lowest item free  |
+
+### Data-Derived Coupons
+
+Eight codes found in 2+ files out of ~313 million, ingested by `cmd/coupon-ingest` using a 2-pass bloom filter algorithm (~510MB memory, parallel decompression with pgzip):
 
 | Code       | Type        | Value | Min Items | Description                    |
 |------------|-------------|-------|-----------|--------------------------------|
@@ -291,261 +144,94 @@ Eight codes found in 2+ files out of ~313 million total, ingested by `cmd/coupon
 | `OVER9000` | fixed       | 9     | 0         | $9 off your order              |
 | `HAPPYHRS` | percentage  | 18    | 0         | Happy Hours: 18% off           |
 
-## Data Ingestion Pipeline
+## What Changes at Scale
 
-The `cmd/coupon-ingest` tool processes three gzip-compressed files (each ~100M+ codes) to find coupon codes that appear in two or more files.
+This is a take-home assignment, not a production system. Here's what I'd change with real traffic:
 
-### Algorithm: 2-Pass Bloom Filter
+**Coupon usage counting** -- The current `UPDATE uses = uses + 1` is a write hotspot. At scale: move to Redis atomic counters with periodic DB sync, or use a separate `coupon_redemptions` table with `SELECT COUNT(*)` and an index.
 
-**Pass 1 -- Build bloom filters (concurrent):**
+**Product catalog** -- Currently fits in a single query. At hundreds of thousands of products: add pagination, materialized views for categories, and Redis caching with invalidation on writes.
 
-For each of the 3 files, a bloom filter is built in parallel. Each filter holds ~120M entries at a 0.1% false positive rate, consuming approximately 170MB of memory.
+**Order placement** -- The happy path is a single INSERT. At high throughput: outbox pattern with async processing, idempotency keys to handle retries, and event sourcing if order state becomes complex.
 
-**Pass 2 -- Find candidates (concurrent):**
+**Rate limiting** -- In-memory sliding window works for a single instance. Behind a load balancer: Redis-backed rate limiter with the same sliding window algorithm.
 
-Each file is streamed again. For every code, the pipeline checks whether it exists in any *other* file's bloom filter. Candidates are tracked with a bitmask indicating which files contain them.
-
-**Validation:**
-
-After merging bitmasks from all files, codes with `popcount(bitmask) >= 2` are confirmed valid.
-
-### Performance Characteristics
-
-| Metric         | Value                                     |
-|----------------|-------------------------------------------|
-| Total codes    | ~313 million across 3 files               |
-| Memory         | ~510MB for bloom filters                  |
-| Decompression  | `klauspost/pgzip` for parallel gunzip     |
-| Concurrency    | Files processed in parallel via `errgroup` |
-| Code filtering | Only codes 8-10 chars are considered      |
-
-### Code Length Distribution
-
-Analysis of the input files reveals that valid codes are exactly 8 characters, while the vast majority of noise codes are 9 or 10 characters:
-
-- **File 1**: 107,260,777 codes, all 8 chars
-- **File 2**: 107,260,768 codes at 9 chars + 8 codes at 8 chars
-- **File 3**: 98,566,144 codes at 10 chars + 8 codes at 8 chars
+**API key auth** -- HMAC hashing per request is fast enough. At millions of requests: add a short-TTL cache (30s) keyed by hash to avoid DB round-trips on every call.
 
 ## Configuration
 
-Configuration is loaded via `cristalhq/aconfig` with the following priority (highest to lowest):
+Via `cristalhq/aconfig` with priority: flags > env vars > config files > defaults.
 
-1. Command-line flags
-2. Environment variables (`KART_` prefix)
-3. Config files (`config.yaml`, `/etc/kart/config.yaml`)
-4. Default values
-
-### Environment Variables
-
-| Variable              | Default         | Description                          |
-|-----------------------|-----------------|--------------------------------------|
-| `KART_DATABASE_URL`   | *(required)*    | PostgreSQL connection URL            |
-| `KART_API_KEY_PEPPER` | *(empty)*       | HMAC pepper for API key hashing      |
-| `KART_ADDR`           | `0.0.0.0:8080`  | API server listen address            |
-| `KART_IMAGE_BASE_URL` | *(empty)*       | Base URL for product images          |
-| `KART_RATE_LIMIT_MAX` | `100`           | Max requests per rate limit window   |
-| `KART_RATE_LIMIT_WINDOW` | `1m`         | Rate limit window duration           |
-| `KART_CORS_ORIGINS`   | `*`             | Allowed CORS origins                 |
-| `KART_GRACEFUL_READINESS_DELAY` | `3s` | Delay after readiness=false before shutdown |
-| `KART_GRACEFUL_SHUTDOWN_TIMEOUT` | `15s` | Maximum graceful shutdown duration |
-
-### Default config.yaml
-
-```yaml
-addr: "0.0.0.0:8080"
-image_base_url: "https://orderfoodonline.deno.dev/public"
-rate_limit:
-  max: 100
-  window: 1m
-cors:
-  origins: ["*"]
-graceful:
-  readiness_delay: 3s
-  shutdown_timeout: 15s
-```
+| Variable                         | Default        | Description                          |
+|----------------------------------|----------------|--------------------------------------|
+| `KART_DATABASE_URL`              | *(required)*   | PostgreSQL connection URL            |
+| `KART_API_KEY_PEPPER`            | *(empty)*      | HMAC pepper for API key hashing      |
+| `KART_ADDR`                      | `0.0.0.0:8080` | Listen address                       |
+| `KART_IMAGE_BASE_URL`            | *(empty)*      | Prefix for product image paths       |
+| `KART_RATE_LIMIT_MAX`            | `100`          | Requests per window                  |
+| `KART_RATE_LIMIT_WINDOW`         | `1m`           | Rate limit window                    |
+| `KART_CORS_ORIGINS`              | `*`            | Allowed CORS origins                 |
+| `KART_GRACEFUL_READINESS_DELAY`  | `3s`           | Drain delay before shutdown          |
+| `KART_GRACEFUL_SHUTDOWN_TIMEOUT` | `15s`          | Max graceful shutdown duration       |
 
 ## Observability
 
-### Grafana
+All push-based, no scraping required:
 
-Available at [http://localhost:3000](http://localhost:3000) with anonymous admin access. Pre-configured datasources for Prometheus, Tempo, and Pyroscope.
+- **Grafana** at [localhost:3000](http://localhost:3000) (anonymous admin)
+- **Prometheus** receives metrics via OTLP push
+- **Tempo** receives traces via OTLP/gRPC
+- **Pyroscope** receives CPU/memory/goroutine/mutex profiles
 
-### Prometheus
-
-Available at [http://localhost:9090](http://localhost:9090). Receives metrics via OTLP push from the API server (no scraping needed).
-
-### Distributed Tracing
-
-Tempo collects traces via OTLP/gRPC on port 4317. The API server instruments all requests with OpenTelemetry spans including operation names from the ogen router.
-
-### Continuous Profiling
-
-Pyroscope receives push-based profiles (CPU, memory, goroutines, mutex) from the API server via `go-faster/sdk/autopyro`. Available at [http://localhost:4040](http://localhost:4040).
-
-### Health Checks
-
-The `pkg/health` package provides Kubernetes-style probes with failure/success thresholds to prevent flapping:
-
-| Endpoint  | Type       | Checks                                 |
-|-----------|------------|----------------------------------------|
-| `/livez`  | Liveness   | Goroutine count < 10,000               |
-| `/readyz` | Readiness  | PostgreSQL connectivity + manual ready flag |
-
-The readiness probe is used in the graceful shutdown sequence: readiness is set to `false`, the server waits for the configured delay (allowing load balancers to drain), then shuts down.
+Health probes: `/livez` (goroutine count < 10k), `/readyz` (Postgres ping + manual ready flag). The readiness probe is used in the graceful shutdown sequence to drain connections before stopping.
 
 ## Project Structure
 
 ```
-api/
-  openapi.yaml                   OpenAPI 3.1 specification (source for codegen)
-
-gen/
-  oas/                           Generated ogen HTTP layer (do not edit)
-  sqlc/                          Generated sqlc DB layer (do not edit)
+api/openapi.yaml                   OpenAPI 3.1 spec (ogen codegen source)
+gen/oas/                           Generated HTTP layer (do not edit)
 
 db/
-  embed.go                       Exports embedded schema (db.Schema)
-  migrations/001_schema.sql      DDL: products, coupons, orders, api_keys tables
-  queries/                       sqlc SQL queries (product, coupon, order, apikey)
-  seed/products.json             Product catalog seed data
+  migrations/001_schema.sql        DDL: products, coupons, orders, api_keys
+  seed/products.json               Product catalog seed data
+  embed.go                         Exports db.Schema via //go:embed
 
 cmd/
-  api-server/main.go             Minimal entry point: LoadConfig → app.Run
-  seed-db/main.go                Database seeding (products, coupons, API key)
-  coupon-ingest/main.go          Bloom filter coupon ingestion pipeline
+  api-server/                      Entry point: LoadConfig → app.Run
+  seed-db/                         Seeds products, coupons, API key
+  coupon-ingest/                   Bloom filter pipeline for .gz files
 
 internal/
-  app/                           Application wiring and lifecycle
-    app.go                       Run: pool, migrations, repos, services, server, shutdown
-    config.go                    Config struct + LoadConfig (aconfig + YAML)
+  app/                             Config + wiring (app.Run)
   domain/
-    product/product.go           Product, Image, Repository, ErrNotFound
-    order/
-      order.go                   Order, OrderItem, Repository
-      service.go                 PlaceOrder business logic (no OAS types)
-      service_test.go            Pure domain unit tests
-    coupon/
-      coupon.go                  Rule, Discount, Item, DiscountType, Repository
-      discount.go                Apply: percentage, fixed, free_lowest
-      discount_test.go           Discount calculation tests
-      validator.go               RepoValidator wrapping Repository + Apply
-      validator_test.go          Validator tests
-    auth/
-      apikey.go                  APIKeyInfo, Repository interface
-  handler/                       Thin HTTP handlers (OAS ↔ domain conversion)
-    handler.go                   Handler struct (products, orderService)
-    product.go                   ListProducts, GetProduct
-    order.go                     PlaceOrder: parse → service → response
-    security.go                  SecurityHandler (HMAC-SHA256 with pepper)
-    handler_test.go              Handler + security unit tests
-  storage/
-    postgres/                    PostgreSQL repository implementations
-      postgres.go                Pool creation + RunMigrations (uses db.Schema)
-      product.go                 product.Repository implementation
-      coupon.go                  coupon.Repository implementation
-      order.go                   order.Repository implementation
-      apikey.go                  auth.Repository implementation
+    product/                       Product, Image, Repository
+    order/                         Order, Service (PlaceOrder)
+    coupon/                        Rule, Discount, Validator, Repository
+    auth/                          APIKeyInfo, Repository
+  handler/                         OAS ↔ domain conversion
+  repository/                      pgx repositories (SQL constants inline)
 
 pkg/
-  httpmiddleware/                HTTP middleware stack
-    httpmiddleware.go            Wrap, InjectLogger, Labeler, Instrument, LogRequests
-    recovery.go                  Panic recovery middleware
-    cors.go                      CORS middleware
-    ratelimit.go                 Sliding window rate limiter
-    requestid.go                 X-Request-ID injection
-    ogen.go                      ogen RouteFinder adapter
-  health/                        Kubernetes-style health check package
-    health.go                    Health service with background check runners
-    checkers.go                  Built-in check functions (goroutine count, etc.)
+  health/                          K8s-style liveness/readiness probes
+  httpmiddleware/                  CORS, rate limiting, request ID, recovery
 
-deploy/                          Observability configs (Prometheus, Tempo, Grafana)
-tests/integration/               Integration tests (Docker Compose + testcontainers)
-config.yaml                      Default application configuration
-Dockerfile                       Multi-stage build (Go 1.25 alpine)
-Makefile                         Build, test, lint, seed, ingest targets
-sqlc.yaml                        sqlc code generation config
-gen.go                           go:generate directive for ogen
+deploy/                            Prometheus, Tempo, Grafana configs
+tests/integration/                 Docker-based integration tests
 ```
 
 ## Commands
 
 ```bash
-make generate          # Run ogen + sqlc code generation
-make build             # Build all binaries (api-server, seed-db, coupon-ingest)
-make test              # Run all tests
-make lint              # Run golangci-lint
-make seed-db           # Run migrations + seed products, coupons, and API key
-make download-coupons  # Download couponbase{1,2,3}.gz from S3
-make ingest-coupons    # Download gz files + run bloom filter ingestion
-make up                # Docker compose up --build -d (full stack)
-make down              # Docker compose down
+make generate        # Run ogen code generation
+make build           # Build all binaries
+make test            # Unit tests with race detector + coverage
+make test-integration # Integration tests (requires Docker)
+make lint            # Run golangci-lint
+make seed-db         # Migrate + seed products, coupons, API key
+make ingest-coupons  # Download gz files + bloom filter ingestion
+make up              # Full stack: postgres + api + seed + observability
+make down            # Stop everything
 ```
-
-## Design Decisions
-
-### PostgreSQL over SQLite
-
-PostgreSQL supports concurrent writes, NUMERIC types for precise decimal math, and shared state for horizontal scaling. The `pgx/v5` driver with `pgxpool` provides connection pooling suitable for production workloads.
-
-### shopspring/decimal for monetary math
-
-All pricing and discount calculations use `decimal.Decimal` instead of `float64`. This eliminates rounding errors that are common with IEEE 754 floating-point arithmetic in financial contexts. Values are stored as `NUMERIC(10,2)` in PostgreSQL.
-
-### 2-pass bloom filter for coupon ingestion
-
-Instead of loading all ~313M codes into memory (which would require tens of gigabytes), the pipeline uses bloom filters at ~170MB each. Two passes over the data identify codes appearing in 2+ files with high confidence. The 0.1% false positive rate is acceptable because the candidate set is tiny (8 codes out of 313M).
-
-### Clean architecture with domain layer
-
-Domain types, interfaces, and business logic live under `internal/domain/` with no imports from generated code (`gen/oas`, `gen/sqlc`). The storage layer imports domain (correct dependency direction). HTTP handlers are thin: they convert OAS types to domain types, call the domain service, and map results back. This keeps business logic testable without HTTP or database concerns.
-
-### Single server with push telemetry
-
-A single HTTP server on `:8080` serves both the API and health probes (`/livez`, `/readyz`). Metrics, traces, and profiles are pushed to their respective backends (Prometheus via OTLP, Tempo via OTLP, Pyroscope) rather than pulled, eliminating the need for a second internal server.
-
-### ogen + sqlc code generation
-
-Both the HTTP layer (ogen from OpenAPI 3.1) and the database layer (sqlc from SQL queries) use code generation. This provides compile-time type safety, eliminates hand-written boilerplate, and keeps the API contract in sync with the spec.
-
-### Graceful shutdown sequence
-
-The shutdown follows a Kubernetes-friendly pattern:
-1. Readiness probe returns unhealthy (`SetReady(false)`)
-2. Wait for configured delay (default 3s) to allow load balancers to drain
-3. Shut down the HTTP server with a timeout (default 15s)
-4. Stop health check background goroutines
-
-## Database Schema
-
-Four tables manage the application state:
-
-```sql
-products    -- Product catalog (id, name, price, category, images)
-coupons     -- Coupon rules (code, discount_type, value, min_items, active)
-orders      -- Placed orders (id, items as JSONB, total, discounts, coupon_code)
-api_keys    -- API authentication (id, key_hash, name, scopes, active)
-```
-
-Migrations are embedded in the Go binary via `//go:embed` and run automatically on startup.
-
-## Technology Stack
-
-| Component         | Technology                                       |
-|-------------------|--------------------------------------------------|
-| Language          | Go 1.25+                                        |
-| HTTP Framework    | ogen (OpenAPI 3.1 code generation)               |
-| Database          | PostgreSQL 17, pgx/v5, pgxpool                   |
-| SQL Codegen       | sqlc                                             |
-| Decimal Math      | shopspring/decimal                               |
-| App Lifecycle     | go-faster/sdk (telemetry, logging, graceful)     |
-| Observability     | OpenTelemetry, Prometheus, Grafana, Tempo         |
-| Rate Limiting     | Custom sliding window (per-IP)                   |
-| Bloom Filters     | bits-and-blooms/bloom                            |
-| Compression       | klauspost/pgzip (parallel decompression)         |
-| Configuration     | cristalhq/aconfig + YAML                         |
-| Logging           | uber-go/zap (structured)                         |
-| Containerization  | Multi-stage Docker build, Docker Compose         |
 
 ## License
 

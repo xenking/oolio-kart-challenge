@@ -14,7 +14,7 @@ import (
 	"github.com/xenking/oolio-kart-challenge/internal/domain/coupon"
 	"github.com/xenking/oolio-kart-challenge/internal/domain/order"
 	"github.com/xenking/oolio-kart-challenge/internal/handler"
-	"github.com/xenking/oolio-kart-challenge/internal/storage/postgres"
+	"github.com/xenking/oolio-kart-challenge/internal/repository"
 	"github.com/xenking/oolio-kart-challenge/pkg/health"
 	"github.com/xenking/oolio-kart-challenge/pkg/httpmiddleware"
 )
@@ -25,13 +25,13 @@ func Run(ctx context.Context, lg *zap.Logger, m *app.Telemetry, cfg *Config) err
 	lg.Info("Initializing", zap.String("addr", cfg.Addr))
 
 	// PostgreSQL pool + migrations.
-	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := repository.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return errors.Wrap(err, "create db pool")
 	}
 	defer pool.Close()
 
-	if err := postgres.RunMigrations(ctx, pool); err != nil {
+	if err := repository.RunMigrations(ctx, pool); err != nil {
 		return errors.Wrap(err, "run migrations")
 	}
 
@@ -45,10 +45,10 @@ func Run(ctx context.Context, lg *zap.Logger, m *app.Telemetry, cfg *Config) err
 	healthSvc.SetReady(true)
 
 	// Repositories.
-	productRepo := postgres.NewProductRepository(pool)
-	couponRepo := postgres.NewCouponRepository(pool)
-	orderRepo := postgres.NewOrderRepository(pool)
-	apikeyRepo := postgres.NewAPIKeyRepository(pool)
+	productRepo := repository.NewProductRepository(pool)
+	couponRepo := repository.NewCouponRepository(pool)
+	orderRepo := repository.NewOrderRepository(pool)
+	apikeyRepo := repository.NewAPIKeyRepository(pool)
 
 	// Domain services.
 	couponValidator := coupon.NewRepoValidator(couponRepo)

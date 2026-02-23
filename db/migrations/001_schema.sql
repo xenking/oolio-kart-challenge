@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     min_items     INTEGER NOT NULL DEFAULT 0,
     description   TEXT NOT NULL DEFAULT '',
     active        BOOLEAN NOT NULL DEFAULT TRUE,
+    valid_from    TIMESTAMPTZ,
+    valid_until   TIMESTAMPTZ,
+    max_uses      INTEGER NOT NULL DEFAULT 0,
+    uses          INTEGER NOT NULL DEFAULT 0,
+    max_discount  NUMERIC(10,2) NOT NULL DEFAULT 0,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

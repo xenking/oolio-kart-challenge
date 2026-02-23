@@ -90,5 +90,19 @@ func mapOrderError(err error) (oas.PlaceOrderRes, error) {
 		}, nil
 	}
 
+	if errors.Is(err, coupon.ErrCouponExpired) {
+		return &oas.PlaceOrderUnprocessableEntity{
+			Code:    422,
+			Message: "coupon expired",
+		}, nil
+	}
+
+	if errors.Is(err, coupon.ErrCouponUsageLimitReached) {
+		return &oas.PlaceOrderUnprocessableEntity{
+			Code:    422,
+			Message: "coupon usage limit reached",
+		}, nil
+	}
+
 	return nil, err
 }

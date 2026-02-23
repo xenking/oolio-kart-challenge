@@ -47,7 +47,7 @@ func (h *Handler) domainToOASProduct(p product.Product) oas.Product {
 	return oas.Product{
 		ID:       oas.NewOptString(p.ID),
 		Name:     oas.NewOptString(p.Name),
-		Price:    oas.NewOptFloat32(float32(p.Price.InexactFloat64())),
+		Price:    oas.NewOptFloat32(float32(p.Price.Round(2).InexactFloat64())),
 		Category: oas.NewOptString(p.Category),
 		Image: oas.NewOptProductImage(oas.ProductImage{
 			Thumbnail: oas.NewOptString(base + p.Image.Thumbnail),

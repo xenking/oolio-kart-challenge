@@ -1,14 +1,14 @@
 DATABASE_URL ?= postgres://kart:kart@localhost:5432/kart?sslmode=disable
 TESTS_PATH   ?= ./...
 COVERAGE_OUT ?= coverage.txt
+COVERPKG     ?= ./internal/...,./pkg/...
 
 setup: fmt-install lint-install dep ## Setup development tools and dependencies
 
 ## --- Build ---
 
-generate: ## Generate code (OAS and SQL queries)
+generate: ## Generate code (OAS)
 	go generate ./...
-	sqlc generate
 .PHONY: generate
 
 build: ## Build all binaries
@@ -36,7 +36,7 @@ lint: dep fmt ## Lint the code (runs dep + fmt first)
 .PHONY: lint
 
 test: ## Run tests with race detector and coverage
-	go test -race $(TESTS_PATH) -coverprofile=$(COVERAGE_OUT) -covermode=atomic -coverpkg=$(TESTS_PATH)
+	go test -race $(TESTS_PATH) -coverprofile=$(COVERAGE_OUT) -covermode=atomic -coverpkg=$(COVERPKG)
 .PHONY: test
 
 test-integration: ## Run integration tests (requires Docker)

@@ -43,6 +43,20 @@ func (m *mockProductRepo) GetByID(_ context.Context, id string) (*product.Produc
 	return p, nil
 }
 
+func (m *mockProductRepo) GetByIDs(_ context.Context, ids []string) ([]product.Product, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	var result []product.Product
+	for _, id := range ids {
+		p, ok := m.byID[id]
+		if ok {
+			result = append(result, *p)
+		}
+	}
+	return result, nil
+}
+
 type mockCouponValidator struct {
 	discount *coupon.Discount
 	err      error
@@ -271,6 +285,40 @@ func TestPlaceOrder(t *testing.T) {
 			wantType:       "unprocessable",
 			wantBadCode:    422,
 			wantBadMessage: "invalid coupon code",
+		},
+		{
+			name:     "expired coupon returns 422",
+			products: newProductRepo(p1),
+			coupons: &mockCouponValidator{
+				err: coupon.ErrCouponExpired,
+			},
+			orders: &mockOrderRepo{},
+			req: &oas.OrderReq{
+				CouponCode: oas.NewOptString("OLD"),
+				Items: []oas.OrderReqItemsItem{
+					{ProductId: "p1", Quantity: 1},
+				},
+			},
+			wantType:       "unprocessable",
+			wantBadCode:    422,
+			wantBadMessage: "coupon expired",
+		},
+		{
+			name:     "coupon usage limit returns 422",
+			products: newProductRepo(p1),
+			coupons: &mockCouponValidator{
+				err: coupon.ErrCouponUsageLimitReached,
+			},
+			orders: &mockOrderRepo{},
+			req: &oas.OrderReq{
+				CouponCode: oas.NewOptString("USED"),
+				Items: []oas.OrderReqItemsItem{
+					{ProductId: "p1", Quantity: 1},
+				},
+			},
+			wantType:       "unprocessable",
+			wantBadCode:    422,
+			wantBadMessage: "coupon usage limit reached",
 		},
 		{
 			name:     "discount larger than subtotal floors total at 0",

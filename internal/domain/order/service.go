@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-faster/errors"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
@@ -14,8 +13,8 @@ import (
 
 // Sentinel errors for order validation.
 var (
-	ErrEmptyItems      = errors.New("items required")
-	ErrInvalidQuantity = errors.New("quantity must be greater than 0")
+	ErrEmptyItems      = fmt.Errorf("items required")
+	ErrInvalidQuantity = fmt.Errorf("quantity must be greater than 0")
 )
 
 // ProductNotFoundError indicates a requested product does not exist.
@@ -68,28 +67,41 @@ func NewService(
 	}
 }
 
-// PlaceOrder validates items, fetches products, applies coupons, persists the
-// order, and returns the result. All business rules are enforced here.
+// PlaceOrder validates items, fetches products in a single batch, applies
+// coupons, persists the order, and returns the result.
 func (s *Service) PlaceOrder(ctx context.Context, req PlaceOrderRequest) (*PlaceOrderResult, error) {
 	if len(req.Items) == 0 {
 		return nil, ErrEmptyItems
 	}
 
-	// Validate quantities and fetch products.
-	products := make([]product.Product, 0, len(req.Items))
-	for _, item := range req.Items {
+	// Validate quantities and collect product IDs.
+	ids := make([]string, len(req.Items))
+	for i, item := range req.Items {
 		if item.Quantity <= 0 {
 			return nil, &InvalidQuantityError{ProductID: item.ProductID}
 		}
+		ids[i] = item.ProductID
+	}
 
-		p, err := s.products.GetByID(ctx, item.ProductID)
-		if err != nil {
-			if errors.Is(err, product.ErrNotFound) {
-				return nil, &ProductNotFoundError{ProductID: item.ProductID}
-			}
-			return nil, fmt.Errorf("get product %s: %w", item.ProductID, err)
+	// Batch fetch all products in a single query.
+	fetched, err := s.products.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("get products: %w", err)
+	}
+
+	productMap := make(map[string]product.Product, len(fetched))
+	for _, p := range fetched {
+		productMap[p.ID] = p
+	}
+
+	// Verify every requested product was found.
+	products := make([]product.Product, 0, len(req.Items))
+	for _, item := range req.Items {
+		p, ok := productMap[item.ProductID]
+		if !ok {
+			return nil, &ProductNotFoundError{ProductID: item.ProductID}
 		}
-		products = append(products, *p)
+		products = append(products, p)
 	}
 
 	// Build coupon items and calculate subtotal.

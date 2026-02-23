@@ -1,4 +1,4 @@
-package postgres
+package repository
 
 import (
 	"context"
@@ -7,20 +7,22 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xenking/oolio-kart-challenge/gen/sqlc"
 	"github.com/xenking/oolio-kart-challenge/internal/domain/order"
 )
+
+const createOrderSQL = `INSERT INTO orders (id, items, total, discounts, coupon_code)
+	VALUES ($1, $2, $3, $4, $5)`
 
 var _ order.Repository = (*OrderRepository)(nil)
 
 // OrderRepository implements order.Repository backed by PostgreSQL.
 type OrderRepository struct {
-	q *sqlc.Queries
+	pool *pgxpool.Pool
 }
 
 // NewOrderRepository returns an OrderRepository that uses the given pool.
 func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository {
-	return &OrderRepository{q: sqlc.New(pool)}
+	return &OrderRepository{pool: pool}
 }
 
 // Create persists a new order. The order items are serialized to JSON for
@@ -31,13 +33,9 @@ func (r *OrderRepository) Create(ctx context.Context, o *order.Order) error {
 		return fmt.Errorf("marshaling order items: %w", err)
 	}
 
-	err = r.q.CreateOrder(ctx, sqlc.CreateOrderParams{
-		ID:         o.ID,
-		Items:      itemsJSON,
-		Total:      o.Total,
-		Discounts:  o.Discounts,
-		CouponCode: o.CouponCode,
-	})
+	_, err = r.pool.Exec(ctx, createOrderSQL,
+		o.ID, itemsJSON, o.Total, o.Discounts, o.CouponCode,
+	)
 	if err != nil {
 		return fmt.Errorf("creating order %q: %w", o.ID, err)
 	}

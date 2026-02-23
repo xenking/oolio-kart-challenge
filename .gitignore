@@ -16,6 +16,7 @@
 coverage.*
 *.coverprofile
 profile.cov
+tests/integration/coverdir/
 
 # Go workspace
 go.work

@@ -2,6 +2,7 @@ package coupon
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/shopspring/decimal"
@@ -19,9 +20,15 @@ const (
 	DiscountFreeLowest DiscountType = "free_lowest"
 )
 
-// ErrInvalidCoupon is returned when a coupon code is not found or
-// the cart does not satisfy the coupon's minimum item requirement.
-var ErrInvalidCoupon = errors.New("invalid coupon code")
+var (
+	// ErrInvalidCoupon is returned when a coupon code is not found or
+	// the cart does not satisfy the coupon's minimum item requirement.
+	ErrInvalidCoupon = errors.New("invalid coupon code")
+	// ErrCouponExpired is returned when a coupon is outside its valid time window.
+	ErrCouponExpired = errors.New("coupon expired")
+	// ErrCouponUsageLimitReached is returned when a coupon has exhausted its allowed uses.
+	ErrCouponUsageLimitReached = errors.New("coupon usage limit reached")
+)
 
 // Rule defines a coupon's discount behaviour and eligibility constraints.
 type Rule struct {
@@ -30,6 +37,11 @@ type Rule struct {
 	Value        decimal.Decimal
 	MinItems     int
 	Description  string
+	ValidFrom    *time.Time
+	ValidUntil   *time.Time
+	MaxUses      int
+	Uses         int
+	MaxDiscount  decimal.Decimal
 }
 
 // Discount holds the computed discount amount and a human-readable description.
@@ -45,7 +57,8 @@ type Item struct {
 	Quantity  int
 }
 
-// Repository provides lookup of coupon rules by their code.
+// Repository provides lookup and mutation of coupon rules.
 type Repository interface {
 	FindByCode(ctx context.Context, code string) (*Rule, error)
+	IncrementUses(ctx context.Context, code string) error
 }
