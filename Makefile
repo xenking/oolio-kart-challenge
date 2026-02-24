@@ -11,13 +11,9 @@ generate: ## Generate code (OAS)
 	go generate ./...
 .PHONY: generate
 
-build: ## Build all binaries
-	go build ./...
-.PHONY: build
-
 ## --- Quality ---
 
-fmt-install: ## Install formatting tools
+fmt-install:
 	go install github.com/daixiang0/gci@v0.13.7
 	go install mvdan.cc/gofumpt@v0.9.2
 .PHONY: fmt-install
@@ -27,7 +23,7 @@ fmt: ## Format the code (gci + gofumpt)
 	gofumpt -l -w -extra cmd internal pkg
 .PHONY: fmt
 
-lint-install: ## Install golangci-lint
+lint-install:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 .PHONY: lint-install
 
@@ -43,7 +39,7 @@ test-integration: ## Run integration tests (requires Docker)
 	go test -v -tags integration -count=1 -timeout 5m ./tests/integration/
 .PHONY: test-integration
 
-test-cover: test ## Run tests and display coverage summary
+test-cover: test
 	@go tool cover -func $(COVERAGE_OUT) | awk '/^total:/ {print "Total coverage: " $$3}'
 .PHONY: test-cover
 
@@ -83,7 +79,7 @@ cleanup-local-branches: ## Remove local branches whose remote is gone
 .PHONY: cleanup-local-branches
 
 # Absolutely awesome: http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
-help: ## Show this help
+help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help

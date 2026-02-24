@@ -18,11 +18,11 @@ services:
     environment:
       KART_DATABASE_URL: postgres://kart:kart@postgres:5432/kart?sslmode=disable
       KART_API_KEY_PEPPER: dev-pepper-not-for-production
-      # Traces: push via gRPC to Tempo.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_TRACES_EXPORTER: otlp
       OTEL_SERVICE_NAME: kart-api
+      # Traces: push via gRPC to Tempo.
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://tempo:4317
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: grpc
       # Metrics: push via OTLP HTTP to Prometheus.
       OTEL_METRICS_EXPORTER: otlp
       OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://prometheus:9090/api/v1/otlp/v1/metrics
@@ -70,7 +70,10 @@ services:
   grafana:
     image: grafana/grafana:11.5.1
     ports: ["3000:3000"]
-    volumes: [./deploy/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro]
+    volumes:
+      - ./deploy/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./deploy/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
